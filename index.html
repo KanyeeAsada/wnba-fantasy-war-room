@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>WNBA Fantasy War Room</title>
+  <title>WNBA Fantasy Draft Board</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
@@ -13,75 +13,464 @@
   <div id="root"></div>
 
   <script type="text/babel">
-    const players = [
-      { name: "A'ja Wilson", ppg: 23.4, rpg: 10.2, apg: 2.3, stl: 1.6, blk: 2.2, threes: 0.6, tov: 1.7 },
-      { name: "Angel Reese", ppg: 14.7, rpg: 12.6, apg: 3.7, stl: 1.4, blk: 0.6, threes: 0.2, tov: 2.2 },
-      { name: "Paige Bueckers", ppg: 19.2, rpg: 4.0, apg: 5.1, stl: 1.4, blk: 0.4, threes: 1.9, tov: 2.6 },
-      { name: "Breanna Stewart", ppg: 18.3, rpg: 6.5, apg: 3.7, stl: 1.4, blk: 1.3, threes: 1.4, tov: 1.8 },
-      { name: "Sabrina Ionescu", ppg: 18.2, rpg: 4.2, apg: 5.6, stl: 1.1, blk: 0.3, threes: 2.8, tov: 2.4 },
-      { name: "Lauren Betts (2026 Prospect)", ppg: 18.0, rpg: 9.5, apg: 1.8, stl: 0.8, blk: 2.1, threes: 0, tov: 2.2 }
+    const { useEffect, useMemo, useState } = React;
+
+    const TEAM_NAMES = [
+      "Team 1", "Team 2", "Team 3", "Team 4",
+      "Team 5", "Team 6", "Team 7", "Team 8"
     ];
 
-    function fantasyScore(p) {
+    function fantasyScore(player) {
+      const ppg = Number(player.ppg || 0);
+      const rpg = Number(player.rpg || 0);
+      const apg = Number(player.apg || 0);
+      const spg = Number(player.spg || 0);
+      const bpg = Number(player.bpg || 0);
+      const threes = Number(player.threes || 0);
+      const tov = Number(player.tov || 0);
+
+      return ppg + rpg * 1.2 + apg * 1.5 + spg * 3 + bpg * 3 + threes - tov;
+    }
+
+    function playerType(player) {
+      return player.school ? "Rookie" : "Active WNBA";
+    }
+
+    function teamOrSchool(player) {
+      return player.team || player.school || "Unknown";
+    }
+
+    function normalizePosition(position = "") {
+      return position.toLowerCase();
+    }
+
+    function isGuard(player) {
+      const pos = normalizePosition(player.position);
+      return pos.includes("g") || pos.includes("guard");
+    }
+
+    function isForward(player) {
+      const pos = normalizePosition(player.position);
+      return pos.includes("f") || pos.includes("forward");
+    }
+
+    function isCenter(player) {
+      const pos = normalizePosition(player.position);
+      return pos.includes("c") || pos.includes("center");
+    }
+
+    function draftBlurb(player) {
+      const score = fantasyScore(player);
+      const strengths = [
+        { key: "PPG", value: Number(player.ppg || 0), phrase: "scoring" },
+        { key: "RPG", value: Number(player.rpg || 0), phrase: "rebounding" },
+        { key: "APG", value: Number(player.apg || 0), phrase: "playmaking" },
+        { key: "SPG", value: Number(player.spg || 0), phrase: "steals" },
+        { key: "BPG", value: Number(player.bpg || 0), phrase: "shot-blocking" },
+        { key: "3PM", value: Number(player.threes || 0), phrase: "three-point shooting" }
+      ].sort((a, b) => b.value - a.value);
+
+      const best = strengths[0];
+      const second = strengths[1];
+
+      if (player.school) {
+        return `${player.name} is a strong rookie upside pick because of her ${best.phrase}${second.value > 0 ? ` and ${second.phrase}` : ""}.`;
+      }
+
+      if (score >= 45) {
+        return `${player.name} is an elite fantasy pick because she produces across multiple categories, especially ${best.phrase}.`;
+      }
+
+      if (Number(player.minutes || 0) >= 28) {
+        return `${player.name} is a reliable pick because she plays heavy minutes and contributes most in ${best.phrase}.`;
+      }
+
+      return `${player.name} is a useful depth pick if you need help with ${best.phrase}${second.value > 0 ? ` and ${second.phrase}` : ""}.`;
+    }
+
+    function StatBox({ label, value }) {
       return (
-        p.ppg +
-        p.rpg * 1.2 +
-        p.apg * 1.5 +
-        p.stl * 3 +
-        p.blk * 3 +
-        p.threes -
-        p.tov
-      ).toFixed(1);
+        <div className="rounded-2xl bg-slate-100 px-3 py-2 text-center">
+          <div className="text-[10px] font-black uppercase tracking-wide text-slate-500">{label}</div>
+          <div className="text-base font-black text-slate-950">{value ?? 0}</div>
+        </div>
+      );
     }
 
     function App() {
-      const [drafted, setDrafted] = React.useState([]);
-      const [search, setSearch] = React.useState("");
+      const [players, setPlayers] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const [error, setError] = useState("");
+      const [search, setSearch] = useState("");
+      const [filter, setFilter] = useState("All");
+      const [sortBy, setSortBy] = useState("Fantasy Score");
+      const [selectedTeam, setSelectedTeam] = useState("Team 1");
+      const [drafted, setDrafted] = useState({});
 
-      const toggleDrafted = (name) => {
-        setDrafted((prev) =>
-          prev.includes(name)
-            ? prev.filter((x) => x !== name)
-            : [...prev, name]
+      useEffect(() => {
+        async function loadData() {
+          try {
+            const [activeResponse, rookieResponse] = await Promise.all([
+              fetch("players.json"),
+              fetch("rookies2026.json")
+            ]);
+
+            if (!activeResponse.ok) throw new Error("Could not load players.json");
+            if (!rookieResponse.ok) throw new Error("Could not load rookies2026.json");
+
+            const activePlayers = await activeResponse.json();
+            const rookiePlayers = await rookieResponse.json();
+
+            const combined = [
+              ...activePlayers.map((p) => ({ ...p, playerPool: "Active WNBA" })),
+              ...rookiePlayers.map((p) => ({ ...p, playerPool: "Rookie" }))
+            ].map((p, index) => ({
+              ...p,
+              id: `${p.playerPool}-${p.name}-${index}`,
+              fantasyScore: Number(fantasyScore(p).toFixed(1)),
+              blurb: draftBlurb(p)
+            }));
+
+            setPlayers(combined);
+          } catch (err) {
+            setError(err.message);
+          } finally {
+            setLoading(false);
+          }
+        }
+
+        loadData();
+      }, []);
+
+      const draftedPlayerIds = Object.keys(drafted);
+
+      const allSortedPlayers = useMemo(() => {
+        let list = [...players];
+
+        list = list.filter((player) => {
+          const text = `${player.name} ${teamOrSchool(player)} ${player.position || ""}`.toLowerCase();
+          const matchesSearch = text.includes(search.toLowerCase());
+
+          let matchesFilter = true;
+          if (filter === "Active WNBA") matchesFilter = player.playerPool === "Active WNBA";
+          if (filter === "2026 Rookies") matchesFilter = player.playerPool === "Rookie";
+          if (filter === "Guards") matchesFilter = isGuard(player);
+          if (filter === "Forwards") matchesFilter = isForward(player);
+          if (filter === "Centers") matchesFilter = isCenter(player);
+
+          return matchesSearch && matchesFilter;
+        });
+
+        list.sort((a, b) => {
+          if (sortBy === "Fantasy Score") return b.fantasyScore - a.fantasyScore;
+          if (sortBy === "PPG") return Number(b.ppg || 0) - Number(a.ppg || 0);
+          if (sortBy === "RPG") return Number(b.rpg || 0) - Number(a.rpg || 0);
+          if (sortBy === "APG") return Number(b.apg || 0) - Number(a.apg || 0);
+          if (sortBy === "SPG") return Number(b.spg || 0) - Number(a.spg || 0);
+          if (sortBy === "BPG") return Number(b.bpg || 0) - Number(a.bpg || 0);
+          if (sortBy === "Minutes") return Number(b.minutes || 0) - Number(a.minutes || 0);
+          if (sortBy === "Efficiency") return Number(b.efficiency || 0) - Number(a.efficiency || 0);
+          return 0;
+        });
+
+        return list;
+      }, [players, search, filter, sortBy]);
+
+      const availablePlayers = allSortedPlayers.filter((p) => !drafted[p.id]);
+      const bestAvailable = availablePlayers.slice(0, 8);
+
+      function draftPlayer(player, teamName = selectedTeam) {
+        setDrafted((prev) => ({
+          ...prev,
+          [player.id]: teamName
+        }));
+      }
+
+      function undoDraft(playerId) {
+        setDrafted((prev) => {
+          const copy = { ...prev };
+          delete copy[playerId];
+          return copy;
+        });
+      }
+
+      function resetDraft() {
+        if (confirm("Reset the whole draft board?")) {
+          setDrafted({});
+        }
+      }
+
+      function playersForTeam(teamName) {
+        return players.filter((p) => drafted[p.id] === teamName);
+      }
+
+      if (loading) {
+        return (
+          <div className="flex min-h-screen items-center justify-center bg-slate-950 text-white">
+            <div className="rounded-3xl bg-white/10 p-8 text-center shadow-2xl ring-1 ring-white/20">
+              <div className="text-3xl font-black">Loading draft board...</div>
+              <p className="mt-2 text-slate-300">Reading players.json and rookies2026.json</p>
+            </div>
+          </div>
         );
-      };
+      }
 
-      const filtered = players
-        .filter((p) =>
-          p.name.toLowerCase().includes(search.toLowerCase())
-        )
-        .sort((a, b) => fantasyScore(b) - fantasyScore(a));
+      if (error) {
+        return (
+          <div className="flex min-h-screen items-center justify-center bg-slate-950 p-6 text-white">
+            <div className="max-w-xl rounded-3xl bg-red-500/20 p-8 shadow-2xl ring-1 ring-red-300/30">
+              <h1 className="text-3xl font-black">Something is missing</h1>
+              <p className="mt-3 text-red-100">{error}</p>
+              <p className="mt-4 text-sm text-red-100">
+                Make sure your GitHub repo has these files in the same folder: <strong>index.html</strong>, <strong>players.json</strong>, and <strong>rookies2026.json</strong>.
+              </p>
+            </div>
+          </div>
+        );
+      }
 
       return (
-        <div className="min-h-screen text-white p-8">
-          <h1 className="text-5xl font-bold mb-6">WNBA Fantasy War Room</h1>
-
-          <input
-            className="w-full p-3 rounded-xl text-black mb-6"
-            placeholder="Search player..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-
-          <div className="grid gap-4">
-            {filtered.map((player, index) => (
-              <div key={player.name} className={`p-5 rounded-2xl ${drafted.includes(player.name) ? "bg-slate-700" : "bg-white text-black"}`}>
-                <div className="flex justify-between items-center">
-                  <div>
-                    <h2 className="text-2xl font-bold">#{index + 1} {player.name}</h2>
-                    <p>PPG: {player.ppg} | RPG: {player.rpg} | APG: {player.apg}</p>
-                    <p>Fantasy Score/Game: {fantasyScore(player)}</p>
+        <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 text-slate-950">
+          <header className="px-4 py-8 text-white md:px-8">
+            <div className="mx-auto max-w-7xl">
+              <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+                <div>
+                  <div className="mb-3 inline-flex rounded-full bg-white/10 px-4 py-2 text-sm font-black text-indigo-100 ring-1 ring-white/20">
+                    WNBA Fantasy Draft Board
                   </div>
-                  <button
-                    onClick={() => toggleDrafted(player.name)}
-                    className="bg-indigo-600 text-white px-4 py-2 rounded-xl"
+                  <h1 className="text-4xl font-black tracking-tight md:text-6xl">Draft smarter, faster, and with backups ready.</h1>
+                  <p className="mt-4 max-w-3xl text-lg text-slate-300">
+                    Track 8 teams, mark drafted players, rank by fantasy value, and find the next best available player instantly.
+                  </p>
+                </div>
+                <div className="grid grid-cols-3 gap-3 rounded-3xl bg-white/10 p-4 ring-1 ring-white/20">
+                  <div>
+                    <div className="text-xs font-bold uppercase text-slate-300">Total</div>
+                    <div className="text-3xl font-black">{players.length}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold uppercase text-slate-300">Drafted</div>
+                    <div className="text-3xl font-black">{draftedPlayerIds.length}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold uppercase text-slate-300">Available</div>
+                    <div className="text-3xl font-black">{players.length - draftedPlayerIds.length}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </header>
+
+          <main className="mx-auto max-w-7xl px-4 pb-12 md:px-8">
+            <section className="mb-6 rounded-3xl bg-white p-5 shadow-2xl">
+              <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <h2 className="text-2xl font-black">8-Team Draft Tracker</h2>
+                  <p className="text-sm text-slate-500">Choose a team, then draft players to that team.</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <select
+                    value={selectedTeam}
+                    onChange={(e) => setSelectedTeam(e.target.value)}
+                    className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 font-bold outline-none focus:ring-2 focus:ring-indigo-500"
                   >
-                    {drafted.includes(player.name) ? "Undo" : "Drafted"}
+                    {TEAM_NAMES.map((team) => <option key={team}>{team}</option>)}
+                  </select>
+                  <button onClick={resetDraft} className="rounded-2xl bg-slate-900 px-4 py-3 font-black text-white hover:bg-slate-700">
+                    Reset Draft
                   </button>
                 </div>
               </div>
-            ))}
-          </div>
+
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                {TEAM_NAMES.map((team) => {
+                  const roster = playersForTeam(team);
+                  return (
+                    <div key={team} className={`rounded-3xl border p-4 ${selectedTeam === team ? "border-indigo-500 bg-indigo-50" : "border-slate-200 bg-slate-50"}`}>
+                      <div className="mb-3 flex items-center justify-between">
+                        <button onClick={() => setSelectedTeam(team)} className="text-left text-lg font-black text-slate-950">
+                          {team}
+                        </button>
+                        <span className="rounded-full bg-slate-900 px-3 py-1 text-xs font-black text-white">{roster.length} picks</span>
+                      </div>
+                      {roster.length === 0 ? (
+                        <p className="text-sm text-slate-500">No players drafted yet.</p>
+                      ) : (
+                        <div className="space-y-2">
+                          {roster.map((p) => (
+                            <div key={p.id} className="flex items-center justify-between gap-2 rounded-2xl bg-white p-2 shadow-sm">
+                              <div className="min-w-0">
+                                <div className="truncate text-sm font-black">{p.name}</div>
+                                <div className="text-xs text-slate-500">{p.fantasyScore} FP/G</div>
+                              </div>
+                              <button onClick={() => undoDraft(p.id)} className="rounded-xl bg-red-100 px-2 py-1 text-xs font-black text-red-700 hover:bg-red-200">
+                                Undo
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+
+            <section className="mb-6 rounded-3xl bg-white p-5 shadow-2xl">
+              <div className="mb-4 flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+                <div>
+                  <h2 className="text-2xl font-black">Best Available</h2>
+                  <p className="text-sm text-slate-500">Updates automatically after each player is drafted.</p>
+                </div>
+                <div className="rounded-2xl bg-indigo-100 px-4 py-2 text-sm font-black text-indigo-700">
+                  Drafting to: {selectedTeam}
+                </div>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                {bestAvailable.map((player, index) => (
+                  <div key={player.id} className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="flex gap-3">
+                      <img
+                        src={player.image}
+                        alt={player.name}
+                        onError={(e) => { e.currentTarget.src = "https://via.placeholder.com/260x190?text=WNBA"; }}
+                        className="h-20 w-20 rounded-2xl object-cover bg-slate-200"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-black text-indigo-700">#{index + 1} available</div>
+                        <div className="truncate text-lg font-black">{player.name}</div>
+                        <div className="text-sm text-slate-500">{teamOrSchool(player)}</div>
+                        <div className="mt-1 text-xl font-black text-slate-950">{player.fantasyScore} FP/G</div>
+                      </div>
+                    </div>
+                    <button onClick={() => draftPlayer(player)} className="mt-3 w-full rounded-2xl bg-indigo-600 px-4 py-2 font-black text-white hover:bg-indigo-700">
+                      Draft to {selectedTeam}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            <section className="mb-6 rounded-3xl bg-white p-5 shadow-2xl">
+              <div className="grid gap-3 md:grid-cols-4">
+                <input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search player, team, school, or position..."
+                  className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 font-semibold outline-none focus:ring-2 focus:ring-indigo-500 md:col-span-2"
+                />
+                <select
+                  value={filter}
+                  onChange={(e) => setFilter(e.target.value)}
+                  className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 font-bold outline-none focus:ring-2 focus:ring-indigo-500"
+                >
+                  <option>All</option>
+                  <option>Active WNBA</option>
+                  <option>2026 Rookies</option>
+                  <option>Guards</option>
+                  <option>Forwards</option>
+                  <option>Centers</option>
+                </select>
+                <select
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value)}
+                  className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 font-bold outline-none focus:ring-2 focus:ring-indigo-500"
+                >
+                  <option>Fantasy Score</option>
+                  <option>PPG</option>
+                  <option>RPG</option>
+                  <option>APG</option>
+                  <option>SPG</option>
+                  <option>BPG</option>
+                  <option>Minutes</option>
+                  <option>Efficiency</option>
+                </select>
+              </div>
+            </section>
+
+            <section className="grid gap-5">
+              {allSortedPlayers.map((player, index) => {
+                const isDrafted = Boolean(drafted[player.id]);
+                return (
+                  <article key={player.id} className={`rounded-3xl border p-5 shadow-xl transition ${isDrafted ? "border-slate-300 bg-slate-200 opacity-70" : "border-slate-200 bg-white hover:-translate-y-1 hover:shadow-2xl"}`}>
+                    <div className="flex flex-col gap-5 lg:flex-row lg:items-start">
+                      <div className="flex gap-4 lg:w-80">
+                        <img
+                          src={player.image}
+                          alt={player.name}
+                          onError={(e) => { e.currentTarget.src = "https://via.placeholder.com/260x190?text=WNBA"; }}
+                          className="h-28 w-28 rounded-3xl bg-slate-200 object-cover shadow-sm"
+                        />
+                        <div className="min-w-0">
+                          <div className="mb-2 flex flex-wrap gap-2">
+                            <span className="rounded-full bg-slate-900 px-3 py-1 text-xs font-black text-white">Rank #{index + 1}</span>
+                            <span className={`rounded-full px-3 py-1 text-xs font-black ${player.playerPool === "Rookie" ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700"}`}>
+                              {player.playerPool}
+                            </span>
+                          </div>
+                          <h3 className="truncate text-2xl font-black text-slate-950">{player.name}</h3>
+                          <p className="text-sm font-semibold text-slate-500">{teamOrSchool(player)} • {player.position || "Position N/A"}</p>
+                          <div className="mt-3 text-3xl font-black text-indigo-700">{player.fantasyScore} FP/G</div>
+                        </div>
+                      </div>
+
+                      <div className="flex-1">
+                        <div className="grid grid-cols-3 gap-2 md:grid-cols-5 lg:grid-cols-9">
+                          <StatBox label="PPG" value={player.ppg} />
+                          <StatBox label="RPG" value={player.rpg} />
+                          <StatBox label="APG" value={player.apg} />
+                          <StatBox label="SPG" value={player.spg} />
+                          <StatBox label="BPG" value={player.bpg} />
+                          <StatBox label="3PM" value={player.threes} />
+                          <StatBox label="TOV" value={player.tov} />
+                          <StatBox label="MIN" value={player.minutes} />
+                          <StatBox label="EFF" value={player.efficiency} />
+                        </div>
+
+                        <p className="mt-4 rounded-2xl bg-indigo-50 p-4 text-sm font-semibold leading-relaxed text-indigo-950">
+                          {player.blurb}
+                        </p>
+
+                        <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                          {isDrafted ? (
+                            <div className="rounded-2xl bg-slate-900 px-4 py-2 text-sm font-black text-white">
+                              Drafted by {drafted[player.id]}
+                            </div>
+                          ) : (
+                            <div className="rounded-2xl bg-green-100 px-4 py-2 text-sm font-black text-green-700">
+                              Available
+                            </div>
+                          )}
+
+                          <div className="flex flex-wrap gap-2">
+                            {!isDrafted && (
+                              <>
+                                <select
+                                  value={selectedTeam}
+                                  onChange={(e) => setSelectedTeam(e.target.value)}
+                                  className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2 font-bold outline-none"
+                                >
+                                  {TEAM_NAMES.map((team) => <option key={team}>{team}</option>)}
+                                </select>
+                                <button onClick={() => draftPlayer(player)} className="rounded-2xl bg-indigo-600 px-5 py-2 font-black text-white hover:bg-indigo-700">
+                                  Draft Player
+                                </button>
+                              </>
+                            )}
+                            {isDrafted && (
+                              <button onClick={() => undoDraft(player.id)} className="rounded-2xl bg-red-100 px-5 py-2 font-black text-red-700 hover:bg-red-200">
+                                Undo Draft Pick
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
+            </section>
+          </main>
         </div>
       );
     }
